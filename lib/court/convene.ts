@@ -1,88 +1,150 @@
 /**
  * TRIBUNAL — hearing orchestrator.
- *
- * OWNER: 🅰 wt-court
- *
- * Emits the canonical event sequence from lib/court/events.ts. Two paths —
- * precached and live — emit IDENTICAL event shapes, which is why the UI never
- * needs to know which one it is watching.
- *
- * STRICTLY SEQUENTIAL. Do not parallelize the arguments. The sequencing is the
- * drama. Prosecution finishes, then Defense begins, then the Judge appears.
  */
 
 import type { HearingEvent } from "@/lib/court/events";
-import { llmAvailable } from "@/lib/llm";
+import { LlmTimeoutError, LlmValidationError, llmAvailable } from "@/lib/llm";
 import { adjudicate, defend, matchPrecedents, prosecute } from "@/lib/court/counsel";
+import {
+  getIncident,
+  getIncidentByCaseNumber,
+  getStoredHearing,
+  resetRulingForReplay,
+  saveArgument,
+  saveRuling,
+  createHearing,
+} from "@/lib/db/queries";
+import type { Incident } from "@/lib/schemas";
 
-export const VETO_WINDOW_SECONDS = 60;
+export const VETO_WINDOW_SECONDS = 10;
 
-/**
- * Async generator so the API route can `for await` and write SSE frames as each
- * event lands. Never buffer the whole hearing and flush at the end.
- */
-export async function* convene(_incidentId: string): AsyncGenerator<HearingEvent> {
-  /*
-   * TODO(🅰) — implement in exactly this order:
-   *
-   *  1. incident = getIncident(incidentId)
-   *
-   *  2. if (incident.is_precached || !llmAvailable())
-   *        yield* replayPrecached(incident)        ← CASE-2281, demo video path
-   *        return
-   *
-   *  3. hearing = createHearing(incident)          // state CONVENED
-   *     yield { type: "hearing.convened", ..., precached: false }
-   *
-   *  4. precedents = await matchPrecedents(incident.error_signature)
-   *     yield { type: "precedents.retrieved", precedents }
-   *     // MUST come before any argument so the UI can resolve citations
-   *
-   *  5. yield { type: "argument.start", role: "PROSECUTION", sequence: 1 }
-   *     pros = await prosecute(incident)
-   *     argumentId = await saveArgument(hearing.id, "PROSECUTION", 1, pros)
-   *     yield { type: "argument.complete", role: "PROSECUTION", sequence: 1, argumentId, payload: pros }
-   *
-   *  6. yield { type: "argument.start", role: "DEFENSE", sequence: 2 }
-   *     { output: def, droppedCitations } = await defend(incident, pros, precedents)
-   *     argumentId = await saveArgument(hearing.id, "DEFENSE", 2, def)
-   *     yield { type: "argument.complete", role: "DEFENSE", sequence: 2, argumentId, payload: def, droppedCitations }
-   *
-   *  7. yield { type: "argument.start", role: "JUDGE", sequence: 3 }
-   *     rul = await adjudicate(incident, pros, def, precedents)
-   *     await saveArgument(hearing.id, "JUDGE", 3, rul)
-   *     ruling = await saveRuling(hearing.id, rul, VETO_WINDOW_SECONDS)   // state RULED
-   *     yield { type: "ruling.delivered", ruling }
-   *
-   *  8. yield { type: "veto.window.open", rulingId: ruling.id,
-   *             opensAt: ruling.veto_opens_at, windowSeconds: VETO_WINDOW_SECONDS }
-   *
-   *  9. Keep the stream open. The client drives the countdown and POSTs to
-   *     /api/veto or /api/execute. Do NOT sleep 60s on the server — a serverless
-   *     function will time out and kill the demo at the worst possible moment.
-   *
-   * ── ERROR HANDLING ──
-   * Wrap steps 5-7. On LlmTimeoutError or LlmValidationError:
-   *     yield { type: "hearing.degraded", reason }
-   *     yield* replayPrecached(CASE_2281)
-   *     return
-   * The demo must never dead-end on a spinner. Degrade visibly, then continue.
-   */
-  throw new Error("NOT_IMPLEMENTED: convene");
+export async function* convene(incidentId: string): AsyncGenerator<HearingEvent> {
+  const incident = await getIncident(incidentId);
+
+  if (incident.is_precached) {
+    yield* replayPrecached(incident);
+    return;
+  }
+
+  if (!llmAvailable()) {
+    yield {
+      type: "hearing.degraded",
+      reason: "No model credentials — showing archived hearing",
+    };
+    const fallback = await getIncidentByCaseNumber("CASE-2281");
+    yield* replayPrecached(fallback);
+    return;
+  }
+
+  try {
+    const hearing = await createHearing(incident);
+    yield {
+      type: "hearing.convened",
+      hearingId: hearing.id,
+      incidentId: incident.id,
+      docketNumber: hearing.docket_number,
+      precached: false,
+    };
+
+    const precedents = await matchPrecedents(incident.error_signature);
+    yield { type: "precedents.retrieved", precedents };
+
+    yield { type: "argument.start", role: "PROSECUTION", sequence: 1 };
+    const pros = await prosecute(incident);
+    const prosId = await saveArgument(hearing.id, "PROSECUTION", 1, pros);
+    yield {
+      type: "argument.complete",
+      role: "PROSECUTION",
+      sequence: 1,
+      argumentId: prosId,
+      payload: pros,
+    };
+
+    yield { type: "argument.start", role: "DEFENSE", sequence: 2 };
+    const { output: def, droppedCitations } = await defend(incident, pros, precedents);
+    const defId = await saveArgument(hearing.id, "DEFENSE", 2, def);
+    yield {
+      type: "argument.complete",
+      role: "DEFENSE",
+      sequence: 2,
+      argumentId: defId,
+      payload: def,
+      droppedCitations,
+    };
+
+    yield { type: "argument.start", role: "JUDGE", sequence: 3 };
+    const rul = await adjudicate(incident, pros, def, precedents);
+    await saveArgument(hearing.id, "JUDGE", 3, rul);
+    const ruling = await saveRuling(hearing.id, rul, VETO_WINDOW_SECONDS);
+    yield { type: "ruling.delivered", ruling };
+
+    yield {
+      type: "veto.window.open",
+      rulingId: ruling.id,
+      opensAt: ruling.veto_opens_at,
+      windowSeconds: VETO_WINDOW_SECONDS,
+    };
+  } catch (err) {
+    if (err instanceof LlmTimeoutError || err instanceof LlmValidationError) {
+      yield {
+        type: "hearing.degraded",
+        reason: err.message,
+      };
+      const fallback = await getIncidentByCaseNumber("CASE-2281");
+      yield* replayPrecached(fallback);
+      return;
+    }
+    throw err;
+  }
 }
 
-/**
- * Replays a stored hearing from the database with ZERO model calls.
- *
- * This is the demo-safety guarantee. It must emit the same event sequence, with
- * `precached: true`, reading arguments and the ruling straight from Postgres.
- *
- * TODO(🅰): reuse the existing hearing/ruling rows for CASE-2281 rather than
- * inserting new ones — re-running the demo must not corrupt seeded state.
- * Reset `executed_at` and `veto_opens_at` on replay so the countdown starts fresh.
- */
-export async function* replayPrecached(
-  _incident: unknown,
-): AsyncGenerator<HearingEvent> {
-  throw new Error("NOT_IMPLEMENTED: replayPrecached");
+export async function* replayPrecached(incident: Incident): AsyncGenerator<HearingEvent> {
+  const stored = await getStoredHearing(incident.id);
+  if (!stored) {
+    yield { type: "hearing.error", message: "No stored hearing available for replay" };
+    return;
+  }
+
+  await resetRulingForReplay(stored.ruling.id);
+
+  const precedents = await matchPrecedents(incident.error_signature);
+
+  yield {
+    type: "hearing.convened",
+    hearingId: stored.hearing.id,
+    incidentId: incident.id,
+    docketNumber: stored.hearing.docket_number,
+    precached: true,
+  };
+
+  yield { type: "precedents.retrieved", precedents };
+
+  yield { type: "argument.start", role: "PROSECUTION", sequence: 1 };
+  yield {
+    type: "argument.complete",
+    role: "PROSECUTION",
+    sequence: 1,
+    argumentId: "precached-pros",
+    payload: stored.prosecution,
+  };
+
+  yield { type: "argument.start", role: "DEFENSE", sequence: 2 };
+  yield {
+    type: "argument.complete",
+    role: "DEFENSE",
+    sequence: 2,
+    argumentId: "precached-def",
+    payload: stored.defense,
+    droppedCitations: [],
+  };
+
+  yield { type: "argument.start", role: "JUDGE", sequence: 3 };
+  yield { type: "ruling.delivered", ruling: stored.ruling };
+
+  yield {
+    type: "veto.window.open",
+    rulingId: stored.ruling.id,
+    opensAt: stored.ruling.veto_opens_at,
+    windowSeconds: stored.ruling.veto_window_seconds,
+  };
 }

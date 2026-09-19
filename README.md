@@ -49,33 +49,31 @@ Incident (real traceback)
 
 ## Data provenance
 
-Incidents and precedents are seeded from **real public GitHub issues** in
-`apache/airflow`, `dbt-labs/dbt-core`, and `great-expectations`. Error text and
-tracebacks are unmodified.
+The four docket cases and the precedent summaries are taken from **real public GitHub issues** in
+`apache/airflow`, `dbt-labs/dbt-core` / `dbt`, and `great-expectations` (`npm run fetch-issues`).
+Issue bodies in `raw_log` / `summary` are unmodified excerpts.
 
-Ruling metadata (verdict, outcome, MTTR) is synthesized for demonstration.
+There are **486 unique issues** in the cache. The on-screen corpus is padded to **1,205** citation
+slots (PLAN cut-gate). Holdings for most slots are title-derived, not LLM-extracted, until
+`OPENAI_API_KEY` is set. Ruling metadata (verdict, outcome, MTTR) is synthesized.
 
-**No remediation is ever executed.** Rulings are recorded, never run. There is no
-write path to any external system.
+**No remediation is ever executed.** Rulings are recorded, never run.
+
+**Not yet true in this checkout:** a live Supabase project, pgvector embeddings, or MCP-created
+schema. `supabase/schema.sql` is ready to apply when you add credentials to `.env.local`.
+Without those keys the app runs in **fixture mode**.
+
+CASE-4417 live generation requires `OPENAI_API_KEY` or `GROQ_API_KEY`. Without a key it degrades
+to the archived CASE-2281 hearing.
 
 ---
 
-## How Cursor was meaningful
+## How Cursor was used in the kit
 
-- **Three scoped `.cursor/rules/*.mdc` files** acted as the project constitution —
-  stack lock, a hard won't-do list, and a full institutional design language enforced
-  on every generated component.
-- **Plan Mode** produced the file-by-file build spec, with per-file time estimates and
-  a ranked cut list, before a single line of code was written.
-- **Supabase MCP server** created the entire schema: 6 tables, RLS policies, the
-  `pgvector` ivfflat index, and the `match_precedents` rpc. We never wrote SQL and
-  never opened the Supabase dashboard.
-- **Three Cursor agents in parallel on git worktrees** — hearing engine, courtroom UI,
-  seed pipeline — merged at two fixed checkpoints.
-- **Browser tool** let an agent see `/tribunal` and fix visual defects without us
-  describing them.
-- **Bugbot** reviewed the final diff before feature freeze.
-- **Context7 MCP** kept Supabase and Next.js API usage current instead of hallucinated.
+The repo still ships the three `.cursor/rules/*.mdc` files, Plan Mode docs, and a
+schema intended for Supabase MCP. This checkout has not yet applied that schema through
+MCP (placeholders remain in `.cursor/mcp.json`). Parallel worktrees and Bugbot were
+the planned day-of process, not a completed history of this tree.
 
 ---
 
@@ -102,14 +100,21 @@ TRIBUNAL gives it both. That is not a feature — it is a governance problem.
 
 ```bash
 npm install
-cp .env.example .env.local     # fill in Supabase + model keys
-npm run seed                   # ingest real issues, embed 1,205 precedents
-npm run precache               # make CASE-2281 deterministic
-npm run dev                    # → /tribunal
+npm run fetch-issues      # optional refresh of scripts/.cache
+npm run generate-corpus   # rebuild fixtures from the cache
+npm run dev               # → /tribunal  (fixture mode if no Supabase keys)
 ```
 
-`CASE-2281` runs with **zero model calls** — it is fully pre-cached and will render
-correctly with the LLM API key unset.
+To attach a real database later:
+
+```bash
+cp .env.example .env.local   # Supabase URL + service role + OPENAI_API_KEY
+# apply supabase/schema.sql to the project, then:
+npm run seed
+npm run precache
+```
+
+`CASE-2281` runs with **zero model calls** in fixture mode.
 
 ---
 

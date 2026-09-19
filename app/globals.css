@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+   * Typeface contract.
+   *
+   * Set on `html` (specificity 0,0,1) rather than `:root` (0,1,0) so that the class
+   * `next/font` puts on <html> always wins. To upgrade to self-hosted webfonts, add the
+   * next/font block in app/layout.tsx — nothing here or in tailwind.config.ts changes.
+   *
+   * Deliberately NOT system-ui/-apple-system: that stack is the single biggest reason
+   * the UI read as machine-generated. Charter is a Matthew Carter text serif that ships
+   * with macOS and was drawn for exactly this — long passages at modest sizes.
+   */
+  html {
+    --font-serif: Charter, "Iowan Old Style", "Source Serif 4", Athelas, Georgia,
+      "Times New Roman", serif;
+    --font-sans: "Inter Tight", Inter, "Helvetica Neue", "Avenir Next", Helvetica, Arial,
+      sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  :root {
+    --background: 240 6% 4%;
+    --foreground: 240 5% 91%;
+    --card: 240 4% 7%;
+    --card-foreground: 240 5% 91%;
+    --popover: 240 4% 7%;
+    --popover-foreground: 240 5% 91%;
+    --primary: 5 55% 49%;
+    --primary-foreground: 240 5% 91%;
+    --secondary: 240 4% 14%;
+    --secondary-foreground: 240 5% 91%;
+    --muted: 240 4% 14%;
+    --muted-foreground: 240 3% 55%;
+    --accent: 45 68% 47%;
+    --accent-foreground: 240 6% 4%;
+    --destructive: 5 55% 49%;
+    --destructive-foreground: 240 5% 91%;
+    --border: 240 4% 15%;
+    --input: 240 4% 15%;
+    --ring: 45 68% 47%;
+    --radius: 4px;
+  }
+
+  * {
+    @apply border-tribunal-border;
+  }
+
+  body {
+    @apply bg-tribunal-bg font-sans text-tribunal-text antialiased;
+  }
+
+  ::selection {
+    background: #c9a227;
+    color: #0a0a0b;
+  }
+
+  /* Thin, unobtrusive scrollbars — a pane divider should read louder than a scrollbar. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2f transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #2a2a2f;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #3a3a41;
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /**
+   * Opening capital on the Judge's opinion. Applied to the streaming container so the
+   * cap is set from the very first typed character rather than snapping in at the end.
+   */
+  .drop-cap::first-letter {
+    float: left;
+    font-size: 3.2em;
+    line-height: 0.82;
+    padding-right: 0.09em;
+    padding-top: 0.05em;
+    font-weight: 600;
+    color: #c9a227;
+  }
+
+  /**
+   * Label followed by a hairline that fills the remaining width. The most
+   * document-like detail available, and it costs one flex row.
+   */
+  .rule-label {
+    @apply flex items-center gap-3 font-sans text-[10px] uppercase tracking-[0.18em] text-tribunal-muted;
+  }
+
+  .rule-label::after {
+    content: "";
+    @apply h-px flex-1 bg-tribunal-rule;
+  }
+
+  /** 1px brass / 2px gap / 1px border — reads as letterpress, not as an app bar. */
+  .double-rule {
+    border-bottom: 1px solid #232327;
+    box-shadow: inset 0 -4px 0 -3px #c9a227;
+  }
+}

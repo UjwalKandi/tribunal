@@ -1,11 +1,5 @@
 /**
  * TRIBUNAL — the ONLY module that talks to a model.
- *
- * OWNER: 🅰 wt-court
- * Constitution rule: nothing else in the codebase calls an LLM or an embedding
- * endpoint. If you find yourself importing an SDK anywhere else, stop.
- *
- * Server-only. Never import this from a Client Component.
  */
 
 import type { z } from "zod";
@@ -13,14 +7,12 @@ import type { z } from "zod";
 export const MODEL_CHAT = process.env.TRIBUNAL_CHAT_MODEL ?? "gpt-4o-mini";
 export const MODEL_EMBED = process.env.TRIBUNAL_EMBED_MODEL ?? "text-embedding-3-small";
 
-/** Per docs/AGENTS.md. Judge is colder than counsel on purpose. */
 export const TEMPERATURE = {
   PROSECUTION: 0.4,
   DEFENSE: 0.4,
   JUDGE: 0.2,
 } as const;
 
-/** Hard ceiling. A hanging request is a failed demo. */
 export const TIMEOUT_MS = 8_000;
 
 export class LlmValidationError extends Error {
@@ -45,53 +37,204 @@ export interface CompleteOptions<T extends z.ZodTypeAny> {
   user: string;
   schema: T;
   temperature: number;
-  /** One retry on Zod failure, then throw. Callers fall back to pre-cached. */
   retries?: number;
   timeoutMs?: number;
-  /** Tag for server-side logging so we can debug after the demo. */
   label: string;
 }
 
-/**
- * Request JSON from the model and validate it against `schema`.
- *
- * TODO(🅰): implement.
- *   1. JSON-mode / response_format json_object
- *   2. AbortController on timeoutMs → throw LlmTimeoutError
- *   3. console.log the RAW response with `label` before parsing — we need this
- *      to debug at 13:30 and there will be no time to add it later
- *   4. schema.safeParse; on failure retry once with the Zod error appended to
- *      the user message; on second failure throw LlmValidationError
- *   5. NEVER return unvalidated data
- */
+function getApiConfig(): { url: string; key: string; chatModel: string; embedModel: string } | null {
+  if (process.env.OPENAI_API_KEY) {
+    return {
+      url: "https://api.openai.com/v1",
+      key: process.env.OPENAI_API_KEY,
+      chatModel: MODEL_CHAT,
+      embedModel: MODEL_EMBED,
+    };
+  }
+  if (process.env.GROQ_API_KEY) {
+    return {
+      url: "https://api.groq.com/openai/v1",
+      key: process.env.GROQ_API_KEY,
+      chatModel: process.env.TRIBUNAL_CHAT_MODEL ?? "llama-3.3-70b-versatile",
+      embedModel: MODEL_EMBED,
+    };
+  }
+  return null;
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new LlmTimeoutError(timeoutMs);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function complete<T extends z.ZodTypeAny>(
-  _opts: CompleteOptions<T>,
+  opts: CompleteOptions<T>,
 ): Promise<z.infer<T>> {
-  throw new Error("NOT_IMPLEMENTED: lib/llm.ts complete()");
+  const config = getApiConfig();
+  if (!config) {
+    throw new Error("No LLM credentials configured");
+  }
+
+  const retries = opts.retries ?? 1;
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
+  let userMessage = opts.user;
+  let lastRaw = "";
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetchWithTimeout(
+      `${config.url}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: config.chatModel,
+          temperature: opts.temperature,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: opts.system },
+            { role: "user", content: userMessage },
+          ],
+        }),
+      },
+      timeoutMs,
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`LLM request failed (${response.status}): ${text}`);
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    lastRaw = data.choices?.[0]?.message?.content ?? "";
+    console.log(`[llm:${opts.label}] raw response:`, lastRaw);
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(lastRaw);
+    } catch {
+      if (attempt < retries) {
+        userMessage = `${opts.user}\n\nYour previous response was invalid JSON. Return valid JSON only.`;
+        continue;
+      }
+      throw new LlmValidationError("Invalid JSON from model", lastRaw);
+    }
+
+    const result = opts.schema.safeParse(parsed);
+    if (result.success) {
+      return result.data;
+    }
+
+    if (attempt < retries) {
+      userMessage = `${opts.user}\n\nValidation failed: ${result.error.message}. Fix and return valid JSON.`;
+      continue;
+    }
+
+    throw new LlmValidationError(result.error.message, lastRaw);
+  }
+
+  throw new LlmValidationError("Exhausted retries", lastRaw);
 }
 
-/**
- * Embed a single string to a 1536-dim vector.
- *
- * TODO(🅰): implement. Used at hearing time (error_signature lookup) and at
- * execution time (embedding the Judge's holding so it becomes retrievable).
- */
-export async function embed(_text: string): Promise<number[]> {
-  throw new Error("NOT_IMPLEMENTED: lib/llm.ts embed()");
+export async function embed(text: string): Promise<number[]> {
+  const config = getApiConfig();
+  if (!config) {
+    throw new Error("No LLM credentials configured");
+  }
+
+  const response = await fetchWithTimeout(
+    `${config.url}/embeddings`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.embedModel,
+        input: text,
+      }),
+    },
+    TIMEOUT_MS,
+  );
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Embedding request failed (${response.status}): ${errText}`);
+  }
+
+  const data = (await response.json()) as {
+    data?: Array<{ embedding?: number[] }>;
+  };
+  const vector = data.data?.[0]?.embedding;
+  if (!vector) {
+    throw new Error("No embedding returned");
+  }
+  return vector;
 }
 
-/**
- * Batch embed. Used ONLY by scripts/ingest.ts (🅲) for the 1,205 precedents.
- * Never called on the demo path.
- */
-export async function embedBatch(_texts: string[]): Promise<number[][]> {
-  throw new Error("NOT_IMPLEMENTED: lib/llm.ts embedBatch()");
+export async function embedBatch(texts: string[]): Promise<number[][]> {
+  const config = getApiConfig();
+  if (!config) {
+    throw new Error("No LLM credentials configured");
+  }
+
+  const batchSize = 100;
+  const results: number[][] = [];
+
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize);
+    const response = await fetchWithTimeout(
+      `${config.url}/embeddings`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: config.embedModel,
+          input: batch,
+        }),
+      },
+      TIMEOUT_MS * 3,
+    );
+
+    if (!response.ok) {
+      throw new Error(`Batch embedding failed (${response.status})`);
+    }
+
+    const data = (await response.json()) as {
+      data?: Array<{ embedding?: number[]; index?: number }>;
+    };
+    const sorted = (data.data ?? []).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    for (const item of sorted) {
+      if (!item.embedding) throw new Error("Missing embedding in batch");
+      results.push(item.embedding);
+    }
+  }
+
+  return results;
 }
 
-/**
- * True when no model credentials are present. The pre-cached CASE-2281 path
- * MUST work when this returns true — that is the demo-safety gate in docs/SEED.md.
- */
 export function llmAvailable(): boolean {
   return Boolean(process.env.OPENAI_API_KEY ?? process.env.GROQ_API_KEY);
 }
