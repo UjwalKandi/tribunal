@@ -7,6 +7,7 @@ have to justify it — and we never asked what happens when the human’s right 
 has an expiration date.
 
 **Repo:** [github.com/UjwalKandi/tribunal](https://github.com/UjwalKandi/tribunal)  
+**Prior work:** [A.I.D.E.](https://github.com/UjwalKandi/A.I.D.E)  
 **Local demo:** `http://localhost:3000/tribunal` (no cloud deploy in this checkout)
 
 ---
@@ -121,6 +122,6 @@ Rebuild GitHub fixtures (optional): `npm run fetch-issues && npm run generate-co
 
 ## Lineage
 
-**A.I.D.E.** (Meta ATX Llama Hackathon, April 2024) diagnosed failures and had no authority and no memory. TRIBUNAL decides, justifies adversarially, can be overruled for ten seconds on stage, and binds the next hearing.
+**[A.I.D.E.](https://github.com/UjwalKandi/A.I.D.E)** (Meta ATX Llama Hackathon, April 2024) diagnosed failures and had no authority and no memory. TRIBUNAL decides, justifies adversarially, can be overruled for ten seconds on stage, and binds the next hearing.
 
 **Build the courtroom before you need it.**
