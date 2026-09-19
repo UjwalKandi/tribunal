@@ -1,124 +1,126 @@
-# ⚖️ TRIBUNAL
+# TRIBUNAL
 
 **A machine court for production incidents.**
 
 We already let AI agents act on production systems. We never built the part where they
-have to justify it — and we never asked what happens when the human's right to say no
+have to justify it — and we never asked what happens when the human’s right to say no
 has an expiration date.
 
+**Repo:** [github.com/UjwalKandi/tribunal](https://github.com/UjwalKandi/tribunal)  
+**Local demo:** `http://localhost:3000/tribunal` (no cloud deploy in this checkout)
+
 ---
 
-## What it does
+## Quick start
 
-A production pipeline fails. TRIBUNAL convenes a hearing.
+```bash
+git clone https://github.com/UjwalKandi/tribunal.git
+cd tribunal
+npm install
+npm run dev
+# open http://localhost:3000/tribunal
+```
 
-| Agent | Role |
+No API keys required for the recorded demo path (**CASE-2281**).
+
+Optional live hearing (CASE-4417) and Supabase persistence:
+
+```bash
+cp .env.example .env.local
+# fill keys (see Reproduce the demo)
+npm run dev
+```
+
+---
+
+## Tech stack
+
+| Layer | Choice |
 |---|---|
-| **Prosecution** | Moves for remediation. Quotes the traceback. Names a respondent. |
-| **Defense** | Concedes the failure, opposes the remedy — citing prior rulings where that same remediation made things worse. |
-| **Judge** | Addresses the Defense's strongest precedent, issues a binding order, and reads the opinion aloud. |
+| App | Next.js 15 (App Router), TypeScript, Tailwind, shadcn/ui |
+| Court | Three LLM roles via `lib/llm.ts` (OpenAI or Groq JSON mode), Zod validation |
+| Memory | Fixture corpus in `fixtures/` today; `supabase/schema.sql` for Postgres + pgvector |
+| Voice | Browser `window.speechSynthesis` only (no paid TTS) |
+| Streaming | Server-Sent Events (`GET /api/hearing`) |
 
-Then a **sixty-second human veto window** opens.
-
-If it expires, the ruling **executes under autonomous authority** and is entered as
-**precedent** — retrievable by vector search, binding on every future hearing.
-
-The court builds its own case law.
-
----
-
-## Architecture
-
-```
-Incident (real traceback)
-  → pgvector search over 1,205 prior rulings
-  → Prosecution argument      (Zod-validated)
-  → Defense argument          (Zod-validated, cites retrieved precedents)
-  → Judge ruling              (Zod-validated, spoken via browser speechSynthesis)
-  → 60s veto window
-      ├─ vetoed  → recorded as dissent
-      └─ expired → EXECUTED under AUTONOMOUS AUTHORITY
-                 → holding embedded and inserted as precedent #N+1
-                 → future hearings cite it
+```mermaid
+flowchart TD
+  docket["Docket /tribunal"] --> convene["CONVENE HEARING"]
+  convene --> sse["GET /api/hearing SSE"]
+  sse --> cache{"CASE-2281 precached?"}
+  cache -->|yes| replay["Replay stored arguments"]
+  cache -->|no + LLM key| live["Prosecute then Defend then Adjudicate"]
+  cache -->|no + no key| degrade["Degrade banner then replay 2281"]
+  live --> zod["Zod validate citations"]
+  replay --> stage["Typewriter UI plus spoken ruling"]
+  zod --> stage
+  degrade --> stage
+  stage --> arm["POST /api/veto-window after typewriter"]
+  arm --> timer["10s HUMAN VETO WINDOW"]
+  timer -->|Veto| dissent["POST /api/veto dissent row"]
+  timer -->|expire| exec["POST /api/execute AUTONOMOUS plus TRIB-1206"]
 ```
 
-**Stack:** Next.js (App Router) · TypeScript · Tailwind · shadcn/ui · Supabase
-(Postgres + pgvector + Realtime + RLS) · Zod · browser `speechSynthesis`
+---
+
+## Reproduce the demo
+
+1. `npm install && npm run dev`
+2. Open `/tribunal`. Voice **On**. Pick **CASE-2281** → **CONVENE HEARING**.
+3. Watch Prosecution, Defense (cited `TRIB-*` + similarity), Judge (serif + speech).
+4. Do **not** click Veto. After **10 seconds** the ruling executes under `AUTONOMOUS` authority and the counter becomes **1,206**.
+
+That path uses embedded fixtures. Unset `OPENAI_API_KEY` / `GROQ_API_KEY` to prove zero model calls.
+
+### Sample `.env.local`
+
+Copy from [`.env.example`](.env.example):
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+OPENAI_API_KEY=
+GROQ_API_KEY=
+TRIBUNAL_CHAT_MODEL=gpt-4o-mini
+TRIBUNAL_EMBED_MODEL=text-embedding-3-small
+```
+
+Leave blank for fixture mode. With `OPENAI_API_KEY` or `GROQ_API_KEY`, convene **CASE-4417** after 2281 executes to try a live ruling that can cite the new precedent. Apply [`supabase/schema.sql`](supabase/schema.sql) only if you want a real database (`npm run seed` / `npm run precache`).
+
+Rebuild GitHub fixtures (optional): `npm run fetch-issues && npm run generate-corpus`.
 
 ---
 
-## Data provenance
+## Datasets and provenance
 
-The four docket cases and the precedent summaries are taken from **real public GitHub issues** in
-`apache/airflow`, `dbt-labs/dbt-core` / `dbt`, and `great-expectations` (`npm run fetch-issues`).
-Issue bodies in `raw_log` / `summary` are unmodified excerpts.
+| Asset | Source | What’s real | What’s synthesized |
+|---|---|---|---|
+| CASE-2281 | [dbt #16331](https://github.com/dbt-labs/dbt/issues/16331) | Issue body excerpt in `raw_log` | Hearing arguments, verdict metadata |
+| CASE-3104 | [Airflow #66786](https://github.com/apache/airflow/issues/66786) | Issue body excerpt | — |
+| CASE-4417 | [Airflow #66524](https://github.com/apache/airflow/issues/66524) | Issue body excerpt | Live LLM ruling if keyed |
+| CASE-5002 | [Airflow #66715](https://github.com/apache/airflow/issues/66715) | Issue body excerpt | — |
+| Precedent corpus | Public issues from `apache/airflow`, `dbt-labs/dbt-core`, `great-expectations` | Titles/summaries from 486 unique issues | 1,205 citation slots (padded); holdings mostly title-derived; verdict / outcome / MTTR weighted |
 
-There are **486 unique issues** in the cache. The on-screen corpus is padded to **1,205** citation
-slots (PLAN cut-gate). Holdings for most slots are title-derived, not LLM-extracted, until
-`OPENAI_API_KEY` is set. Ruling metadata (verdict, outcome, MTTR) is synthesized.
-
-**No remediation is ever executed.** Rulings are recorded, never run.
-
-**Not yet true in this checkout:** a live Supabase project, pgvector embeddings, or MCP-created
-schema. `supabase/schema.sql` is ready to apply when you add credentials to `.env.local`.
-Without those keys the app runs in **fixture mode**.
-
-CASE-4417 live generation requires `OPENAI_API_KEY` or `GROQ_API_KEY`. Without a key it degrades
-to the archived CASE-2281 hearing.
+**No remediation is executed.** There is no write path to any pipeline or vendor API except optional LLM/embed calls.
 
 ---
 
-## How Cursor was used in the kit
+## Known limitations and next steps
 
-The repo still ships the three `.cursor/rules/*.mdc` files, Plan Mode docs, and a
-schema intended for Supabase MCP. This checkout has not yet applied that schema through
-MCP (placeholders remain in `.cursor/mcp.json`). Parallel worktrees and Bugbot were
-the planned day-of process, not a completed history of this tree.
+- Fixture mode, not live pgvector, unless you apply `supabase/schema.sql` and embed.
+- Demo veto is **10 seconds** (pitch copy still uses sixty as the operational metaphor).
+- CASE-4417 without an LLM key degrades to archived CASE-2281.
+- Holdings are not fully LLM-extracted; padded citations reuse issue text.
+- No auth, no production execution, no mobile layout, no appeals UI.
+- No Vercel URL in this submission — judges should run locally or watch the Loom.
+
+**Next:** point at a closed incident archive (Jira / PagerDuty export) in read-only advisory mode; measure agreement vs human RCAs; keep the autonomous execute path off until security review.
 
 ---
 
 ## Lineage
 
-**A.I.D.E.** (Meta ATX Llama Hackathon, April 2024) was an automated RCA engine. It
-could tell you what went wrong. It had no authority and no memory.
-
-| | A.I.D.E. (2024) | TRIBUNAL |
-|---|---|---|
-| Diagnose | ✅ | ✅ |
-| Decide | ❌ | ✅ |
-| Justify the decision | ❌ | ✅ adversarially |
-| Be overruled | n/a | ✅ — for 60 seconds |
-| Bind the future | ❌ | ✅ precedent |
-
-TRIBUNAL gives it both. That is not a feature — it is a governance problem.
+**A.I.D.E.** (Meta ATX Llama Hackathon, April 2024) diagnosed failures and had no authority and no memory. TRIBUNAL decides, justifies adversarially, can be overruled for ten seconds on stage, and binds the next hearing.
 
 **Build the courtroom before you need it.**
-
----
-
-## Run locally
-
-```bash
-npm install
-npm run fetch-issues      # optional refresh of scripts/.cache
-npm run generate-corpus   # rebuild fixtures from the cache
-npm run dev               # → /tribunal  (fixture mode if no Supabase keys)
-```
-
-To attach a real database later:
-
-```bash
-cp .env.example .env.local   # Supabase URL + service role + OPENAI_API_KEY
-# apply supabase/schema.sql to the project, then:
-npm run seed
-npm run precache
-```
-
-`CASE-2281` runs with **zero model calls** in fixture mode.
-
----
-
-## Not built (deliberately)
-
-No auth. No multi-tenancy. No real remediation execution. No appeals. No mobile layout.
-One screen, one path, built in a day.
