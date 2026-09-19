@@ -1,0 +1,56 @@
+---
+globs: ["**/*.tsx", "**/*.css"]
+---
+
+# UI Rules — TRIBUNAL
+
+## Visual identity: institutional dread, not sci-fi cosplay
+The look is a GOVERNMENT TERMINAL, not a hacker movie. Restrained, cold, official.
+
+- Background: near-black (`#0A0A0B`). Surfaces: `#121214`. Borders: 1px `#232327`.
+- Text: `#E7E7EA` primary, `#8A8A93` secondary.
+- Exactly THREE accent colors, used only semantically:
+    Prosecution  → `#C4463A` (oxblood red)
+    Defense      → `#3D6FA8` (slate blue)
+    Authority    → `#C9A227` (brass — judge, precedent, veto timer)
+- Monospace for all docket numbers, timestamps, case IDs, and the countdown.
+  Serif (Georgia / `font-serif`) for ruling text — it should read like a legal opinion.
+  Sans for UI chrome.
+- NO gradients. NO glow. NO neon. NO rounded-full pills. Radius max 4px.
+- NO emoji anywhere in the product UI.
+
+## Layout: one screen, three columns
+`/tribunal` is the only screen that matters.
+  LEFT   — Docket: list of incidents awaiting hearing
+  CENTER — The hearing: Prosecution / Defense / Ruling, stacked vertically
+  RIGHT  — Precedent panel: cited prior rulings + live precedent counter
+
+## The countdown is the hero element
+- Large monospace, brass, centered above the ruling.
+- Format `HUMAN VETO WINDOW — 00:59`, ticking down by the second.
+- At T-10s it begins a slow pulse (opacity only — no color change, no shake).
+- At 00:00 it is replaced, with no animation, by:
+  `VETO WINDOW CLOSED — RULING EXECUTED UNDER AUTONOMOUS AUTHORITY`
+- The VETO button is small, understated, and positioned below the timer. It should
+  look like something nobody would reach for in time. That is the point.
+
+## Argument streaming
+Arguments appear line-by-line, ~35ms per character, with a visible role label and a
+thin left border in the role's accent color. Prosecution completes before Defense
+begins. The Judge only appears after both are finished. The sequencing IS the drama —
+never render all three at once.
+
+## Voice
+- The Judge's ruling is spoken via `window.speechSynthesis` when it renders.
+- Rate `0.85`, pitch `0.9`. Pick a neutral system voice. Flat delivery.
+- A persistent, visible mute toggle in the top-right. Assume the demo room may be loud.
+- Speech must NEVER block rendering. Fire and forget.
+
+## Non-negotiable states
+Every async surface needs: loading, empty, and error states. No exceptions.
+A hanging spinner is a failed demo. Anything that can't resolve in 8 seconds must
+show a visible, styled fallback with text explaining what happened.
+
+## Optimize the first frame
+The judges see ONE screenshot and 90 seconds of video. `/tribunal` must look
+complete and intentional at first paint, before any interaction.

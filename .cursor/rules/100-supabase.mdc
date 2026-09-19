@@ -1,0 +1,41 @@
+---
+globs: ["**/supabase/**", "**/lib/db/**", "**/lib/supabase*", "**/*.sql"]
+---
+
+# Supabase Rules — TRIBUNAL
+
+## Schema changes
+- Use the Supabase MCP server for ALL schema work. Never hand-write migration files.
+- Never tell me to open the Supabase dashboard. Do it through MCP.
+- After any schema change, regenerate TypeScript types. Never hand-write row types.
+
+## Table conventions
+Every table gets:
+  id          uuid primary key default gen_random_uuid()
+  created_at  timestamptz not null default now()
+
+## Security
+- RLS enabled on every table, no exceptions.
+- Demo-permissive policies (anon read; anon insert only on `vetoes` and `queries`),
+  each with a `-- TODO: tighten before any real deployment` comment above it.
+- Service-role key is server-side only. Never import it into a Client Component.
+
+## Vector search
+- `pgvector` extension. `precedents.embedding vector(1536)`.
+- One `ivfflat` index with `vector_cosine_ops`, `lists = 100`.
+- Precedent lookup goes through ONE rpc: `match_precedents(query_embedding, match_threshold, match_count)`.
+  Never build ad-hoc similarity SQL in application code.
+- Embeddings for all seeded precedents are computed ONCE during ingest and stored.
+  The demo path performs ZERO embedding calls for pre-cached cases.
+
+## Realtime
+- The precedent counter and the docket list subscribe to Realtime on `precedents`
+  and `rulings`.
+- Every subscription MUST unsubscribe in the `useEffect` cleanup return. Leaks will
+  break the demo on the second run-through.
+
+## Data integrity for the demo
+- Seed data is authoritative. Never write code that mutates seeded rows.
+- The only writes during a demo are: one `hearings` row, three `arguments` rows,
+  one `rulings` row, one `precedents` row, and optionally one `vetoes` row.
+- All writes are idempotent-safe: re-running the demo must not corrupt state.

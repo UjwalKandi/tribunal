@@ -1,0 +1,63 @@
+---
+alwaysApply: true
+---
+
+# TRIBUNAL — Project Constitution
+
+## What this is
+TRIBUNAL is a machine court for production incidents. Three LLM agents (Prosecution,
+Defense, Judge) hold an adversarial hearing over a data-pipeline failure, cite
+precedent from a vector-searchable case-law database, and issue a binding ruling.
+A human has a 60-second veto window. If it expires, the ruling executes under
+autonomous authority and is entered as precedent that binds future rulings.
+
+## Operating context
+This is a ONE-DAY hackathon build. Hard feature freeze at 1:45 PM.
+Optimize for DEMO RELIABILITY and VISUAL IMPACT, not scale or correctness at scale.
+Read docs/PRD.md and docs/PLAN.md before any multi-file change.
+
+## Stack — do not deviate
+Next.js App Router · TypeScript (strict) · Tailwind · shadcn/ui · Supabase JS v2 · Zod
+LLM calls go through a single server-side module: `lib/llm.ts`. Nothing else calls a model.
+Voice = browser `window.speechSynthesis` ONLY. No paid TTS. No API keys for voice.
+
+## Hard rules
+- NO new npm packages without my explicit approval. Ask first, every time.
+- NO auth, NO user accounts, NO sign-up, NO multi-tenancy. Single-tenant demo.
+- NO real remediation execution. Rulings are SIMULATED — we write a row, we never
+  run a command, touch a pipeline, or call an external system.
+- NO refactors of working code. If it works, it is frozen. Ever.
+- Every feature must be reachable from `/tribunal` in ONE click.
+- Fail loudly and VISIBLY in the UI. Never swallow an error into console.log.
+- Prefer ONE cinematic screen over three functional ones.
+- If a change requires touching more than 3 files, stop and show me the plan first.
+
+## The demo path is sacred
+`/tribunal` → pick a case → "CONVENE HEARING" → arguments stream in →
+ruling delivered + spoken aloud → 60s veto countdown → expiry → precedent counter increments.
+
+Any code that is not on that path is a liability. When in doubt, delete it.
+
+## Determinism requirement
+Case #1 (`CASE-2281`) must render from PRE-CACHED arguments stored in the database.
+It must NEVER require a live LLM call. This is the case used in the demo video.
+Case #2 generates live to prove the system is real. If live generation fails, the UI
+must degrade to a visible "GENERATION UNAVAILABLE — SHOWING ARCHIVED HEARING" state,
+never a blank screen or a spinner that hangs.
+
+## Code style
+- Files under 200 lines. Extract early.
+- Named exports only (except Next.js pages/layouts).
+- Zod-validate EVERY LLM response before it touches the UI or the DB.
+- Server Components by default. Client Components only for the countdown, streaming
+  argument display, and speech synthesis.
+- No `any`. No `@ts-ignore`. No unhandled promise.
+
+## Tone of all user-facing copy
+Institutional, clinical, bureaucratic. Like a court docket or an NTSB report.
+Never playful. Never emoji in the product UI. Never exclamation marks.
+Use: DOCKET, HEARING, RULING, PRECEDENT, MOTION, DISSENT, AUTONOMOUS AUTHORITY.
+
+## When uncertain
+Ask ONE clarifying question, then propose the smallest change that could work.
+Never scaffold speculative abstractions. Never add "nice to have" features.
