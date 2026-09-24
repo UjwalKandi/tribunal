@@ -41,7 +41,7 @@ type IncidentRow = {
 };
 
 /** Give up waiting after this long; the courtroom still opens on fixtures. */
-const CATCH_UP_TIMEOUT_MS = 10_000;
+const CATCH_UP_TIMEOUT_MS = 20_000;
 
 const g = globalThis as typeof globalThis & { __tribunalLog?: Promise<void> };
 

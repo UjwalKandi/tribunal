@@ -9,6 +9,7 @@ import {
   getHearingIncidentId,
   getRuling,
   hasVeto,
+  isFixtureMode,
   insertPrecedent,
   insertVeto,
   markExecuted,
@@ -41,11 +42,14 @@ export async function executeRuling(
   const citation = `TRIB-${String(n).padStart(4, "0")}`;
   const incidentId = await getHearingIncidentId(ruling.hearing_id);
 
+  // Embeddings only feed pgvector retrieval in Supabase mode; fixture mode matches by keyword.
   let embedding: number[] | null = null;
-  try {
-    embedding = await embed(ruling.holding);
-  } catch (err) {
-    console.error("[executeRuling] embedding failed, inserting null:", err);
+  if (!isFixtureMode()) {
+    try {
+      embedding = await embed(ruling.holding);
+    } catch (err) {
+      console.error("[executeRuling] embedding failed, inserting null:", err);
+    }
   }
 
   await insertPrecedent({

@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { Kafka, logLevel, type Producer } from "kafkajs";
+import { Kafka, logLevel, Partitioners, type Producer } from "kafkajs";
 import { decode, encode, schemaIdFor } from "@/lib/stream/registry";
 import { TOPICS, type TopicName } from "@/lib/stream/topics";
 
@@ -61,13 +61,17 @@ export function kafka(): Kafka {
       username: process.env.CONFLUENT_API_KEY!,
       password: process.env.CONFLUENT_API_SECRET!,
     },
+    // kafkajs defaults to a 1s connect timeout; a TLS + SASL handshake to
+    // Confluent Cloud over a corporate network or VPN regularly takes longer.
+    connectionTimeout: 10_000,
+    authenticationTimeout: 10_000,
     logLevel: logLevel.WARN,
   });
 }
 
 function producer(): Promise<Producer> {
   bus.producer ??= (async () => {
-    const p = kafka().producer();
+    const p = kafka().producer({ createPartitioner: Partitioners.DefaultPartitioner });
     await p.connect();
     return p;
   })().catch((err) => {
