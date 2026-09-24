@@ -10,9 +10,11 @@
     "seed": "tsx scripts/ingest.ts",
     "fetch-issues": "tsx scripts/fetch-github-issues.ts",
     "generate-corpus": "tsx scripts/generate-corpus.ts",
-    "precache": "tsx scripts/precache.ts"
+    "precache": "tsx scripts/precache.ts",
+    "stream:schemas": "tsx --env-file=.env.local scripts/register-schemas.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@radix-ui/react-scroll-area": "^1.2.3",
     "@radix-ui/react-separator": "^1.1.2",
     "@radix-ui/react-slot": "^1.1.2",
@@ -20,6 +22,7 @@
     "@supabase/supabase-js": "^2.49.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "kafkajs": "^2.2.4",
     "lucide-react": "^0.475.0",
     "next": "15.2.0",
     "react": "^19.0.0",

@@ -6,6 +6,16 @@ We already let AI agents act on production systems. We never built the part wher
 have to justify it — and we never asked what happens when the human’s right to say no
 has an expiration date.
 
+**The thesis:** in an AI automation cycle, the step that decides whether to change production
+is the one that compounds, so it deserves its own compute, inference, tokens and memory.
+TRIBUNAL gives it all four:
+- three adversarial model calls per decision;
+- a Flink-enforced human veto window;
+- a precedent log in Kafka that every later decision is argued against.
+
+Each ruling becomes history, and history shapes the next ruling. That's a recursive decision
+pipeline that improves the longer it runs.
+
 **Repo:** [github.com/UjwalKandi/tribunal](https://github.com/UjwalKandi/tribunal)  
 **Prior work:** [A.I.D.E.](https://github.com/UjwalKandi/A.I.D.E)  
 **Local demo:** `http://localhost:3000/tribunal` (no cloud deploy in this checkout)
@@ -34,12 +44,24 @@ npm run dev
 
 ---
 
+## On Confluent Cloud
+
+With `CONFLUENT_*` and `SR_*` set in `.env.local`, every hearing streams to Kafka.
+- **Flink decides the veto window**: a ruling executes only if `confluent/flink/02_veto_window.sql` finds no veto within 10 seconds.
+- **The precedent history lives on `tribunal.precedents`** and is replayed on boot. Restart the app and the court still remembers.
+- **A GitHub Source connector** streams real Airflow and dbt failures onto the docket, ready to convene.
+- Every topic is governed by Schema Registry.
+
+Setup, SQL and demo checks: [`confluent/README.md`](confluent/README.md). Leave those variables blank and everything below works unchanged.
+
+---
+
 ## Tech stack
 
 | Layer | Choice |
 |---|---|
 | App | Next.js 15 (App Router), TypeScript, Tailwind, shadcn/ui |
-| Court | Three LLM roles via `lib/llm.ts` (OpenAI or Groq JSON mode), Zod validation |
+| Court | Three LLM roles via `lib/llm.ts`: Claude (`claude-opus-5`, structured outputs) or OpenAI/Groq JSON mode, Zod validation |
 | Memory | Fixture corpus in `fixtures/` today; `supabase/schema.sql` for Postgres + pgvector |
 | Voice | Browser `window.speechSynthesis` only (no paid TTS) |
 | Streaming | Server-Sent Events (`GET /api/hearing`) |

@@ -2,6 +2,7 @@
  * TRIBUNAL — the three counsel functions.
  */
 
+import { DEFENSE_JSON, PROSECUTION_JSON, RULING_JSON } from "@/lib/court/output-schemas";
 import {
   DefenseOutput,
   Incident,
@@ -38,6 +39,7 @@ export async function prosecute(incident: Incident): Promise<ProsecutionOutput> 
       raw_log: incident.raw_log,
     }),
     schema: ProsecutionOutput,
+    jsonSchema: PROSECUTION_JSON,
     temperature: TEMPERATURE.PROSECUTION,
     label: "prosecution",
   });
@@ -72,6 +74,7 @@ export async function defend(
       precedents: precedentList,
     }),
     schema: DefenseOutput,
+    jsonSchema: DEFENSE_JSON,
     temperature: TEMPERATURE.DEFENSE,
     label: "defense",
   });
@@ -108,6 +111,7 @@ export async function adjudicate(
       instruction: `You MUST address precedent ${strongest} explicitly in your ruling.`,
     }),
     schema: RulingOutput,
+    jsonSchema: RULING_JSON,
     temperature: TEMPERATURE.JUDGE,
     label: "judge",
   });

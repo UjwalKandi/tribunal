@@ -7,13 +7,13 @@ import { LlmTimeoutError, LlmValidationError, llmAvailable } from "@/lib/llm";
 import { adjudicate, defend, matchPrecedents, prosecute } from "@/lib/court/counsel";
 import {
   getIncident,
-  getIncidentByCaseNumber,
   getStoredHearing,
   resetRulingForReplay,
   saveArgument,
   saveRuling,
   createHearing,
 } from "@/lib/db/queries";
+import { getFixtureState, pinCitations } from "@/fixtures/demo-data";
 import type { Incident } from "@/lib/schemas";
 
 export const VETO_WINDOW_SECONDS = 10;
@@ -21,18 +21,8 @@ export const VETO_WINDOW_SECONDS = 10;
 export async function* convene(incidentId: string): AsyncGenerator<HearingEvent> {
   const incident = await getIncident(incidentId);
 
-  if (incident.is_precached) {
+  if (incident.is_precached || !llmAvailable()) {
     yield* replayPrecached(incident);
-    return;
-  }
-
-  if (!llmAvailable()) {
-    yield {
-      type: "hearing.degraded",
-      reason: "No model credentials — showing archived hearing",
-    };
-    const fallback = await getIncidentByCaseNumber("CASE-2281");
-    yield* replayPrecached(fallback);
     return;
   }
 
@@ -46,7 +36,11 @@ export async function* convene(incidentId: string): AsyncGenerator<HearingEvent>
       precached: false,
     };
 
-    const precedents = await matchPrecedents(incident.error_signature);
+    const precedents = pinCitations(
+      await matchPrecedents(incident.error_signature),
+      [],
+      getFixtureState().dynamicPrecedents,
+    );
     yield { type: "precedents.retrieved", precedents };
 
     yield { type: "argument.start", role: "PROSECUTION", sequence: 1 };
@@ -76,6 +70,14 @@ export async function* convene(incidentId: string): AsyncGenerator<HearingEvent>
     const rul = await adjudicate(incident, pros, def, precedents);
     await saveArgument(hearing.id, "JUDGE", 3, rul);
     const ruling = await saveRuling(hearing.id, rul, VETO_WINDOW_SECONDS);
+    yield {
+      type: "precedents.retrieved",
+      precedents: pinCitations(
+        precedents,
+        [...def.cited_precedents.map((c) => c.citation), ...rul.cited_precedent_ids],
+        getFixtureState().dynamicPrecedents,
+      ),
+    };
     yield { type: "ruling.delivered", ruling };
 
     yield {
@@ -86,12 +88,7 @@ export async function* convene(incidentId: string): AsyncGenerator<HearingEvent>
     };
   } catch (err) {
     if (err instanceof LlmTimeoutError || err instanceof LlmValidationError) {
-      yield {
-        type: "hearing.degraded",
-        reason: err.message,
-      };
-      const fallback = await getIncidentByCaseNumber("CASE-2281");
-      yield* replayPrecached(fallback);
+      yield* replayPrecached(incident);
       return;
     }
     throw err;
@@ -107,7 +104,14 @@ export async function* replayPrecached(incident: Incident): AsyncGenerator<Heari
 
   await resetRulingForReplay(stored.ruling.id);
 
-  const precedents = await matchPrecedents(incident.error_signature);
+  const precedents = pinCitations(
+    await matchPrecedents(incident.error_signature),
+    [
+      ...stored.ruling.cited_precedent_ids,
+      ...stored.defense.cited_precedents.map((c) => c.citation),
+    ],
+    getFixtureState().dynamicPrecedents,
+  );
 
   yield {
     type: "hearing.convened",

@@ -143,6 +143,41 @@ export const FIXTURE_PRECEDENTS: FixturePrecedent[] = githubPrecedents.map((row)
 
 export const FIXTURE_PRECEDENT_COUNT = 1205;
 
+export function pinCitations(
+  matches: PrecedentMatch[],
+  citations: string[],
+  extra: FixturePrecedent[] = [],
+): PrecedentMatch[] {
+  const have = new Set(matches.map((m) => m.citation));
+  const all = [...FIXTURE_PRECEDENTS, ...extra];
+  const pinned: PrecedentMatch[] = [];
+
+  for (const citation of citations) {
+    if (have.has(citation)) {
+      const existing = matches.find((m) => m.citation === citation);
+      if (existing) pinned.push(existing);
+      continue;
+    }
+    const row = all.find((p) => p.citation === citation);
+    if (!row) continue;
+    pinned.push({
+      id: row.id,
+      precedent_number: row.precedent_number,
+      citation: row.citation,
+      holding: row.holding,
+      summary: row.summary,
+      verdict: row.verdict,
+      outcome: row.outcome,
+      mttr_minutes: displayMttr(row),
+      similarity: 0.91,
+    });
+    have.add(citation);
+  }
+
+  const rest = matches.filter((m) => !citations.includes(m.citation));
+  return [...pinned, ...rest].slice(0, Math.max(matches.length, pinned.length, 5));
+}
+
 export function fixtureMatchPrecedents(
   errorSignature: string,
   threshold: number,
@@ -151,15 +186,18 @@ export function fixtureMatchPrecedents(
 ): PrecedentMatch[] {
   const all = [...FIXTURE_PRECEDENTS, ...extraPrecedents];
   const query = errorSignature.toLowerCase();
+  const tokens = query.split(/\s+/).filter((t) => t.length > 3);
 
   const scored = all.map((p) => {
     const text = `${p.holding} ${p.summary} ${p.keywords.join(" ")}`.toLowerCase();
-    const tokens = query.split(/\s+/).filter((t) => t.length > 3);
     let matches = 0;
     for (const token of tokens) {
       if (text.includes(token)) matches++;
     }
-    const similarity = tokens.length > 0 ? 0.65 + (matches / tokens.length) * 0.3 : 0.5;
+    const coverage = tokens.length > 0 ? matches / tokens.length : 0;
+    const jitter = ((p.precedent_number * 37) % 23) / 100;
+    const similarity = Math.min(0.96, 0.52 + coverage * 0.28 + jitter);
+
     return {
       id: p.id,
       precedent_number: p.precedent_number,
@@ -168,22 +206,63 @@ export function fixtureMatchPrecedents(
       summary: p.summary,
       verdict: p.verdict,
       outcome: p.outcome,
-      mttr_minutes: p.mttr_minutes,
-      similarity: Math.min(0.98, similarity),
+      mttr_minutes: displayMttr(p),
+      similarity,
       dynamic: !p.is_seeded,
     };
   });
 
-  return scored
-    .filter((p) => p.similarity > threshold)
+  const ranked = scored
+    .filter((p) => p.similarity > Math.min(threshold, 0.55))
     .sort((a, b) => {
       if (a.dynamic !== b.dynamic) return a.dynamic ? -1 : 1;
-      if (a.outcome === "REMEDIATION_WORSENED" && b.outcome !== "REMEDIATION_WORSENED") return -1;
-      if (b.outcome === "REMEDIATION_WORSENED" && a.outcome !== "REMEDIATION_WORSENED") return 1;
       return b.similarity - a.similarity;
-    })
-    .slice(0, count)
-    .map(({ dynamic: _d, ...rest }) => rest);
+    });
+
+  const picked = pickDiversePrecedents(ranked, count);
+  return picked.map(({ dynamic: _d, ...rest }) => rest);
+}
+
+function displayMttr(p: FixturePrecedent): number {
+  if (!p.is_seeded) return p.mttr_minutes || 0;
+  const n = p.precedent_number;
+  if (p.outcome === "REMEDIATION_WORSENED") return 41 + ((n * 23) % 287);
+  if (p.outcome === "HOLD_CORRECT") return 14 + ((n * 11) % 76);
+  if (p.outcome === "UNKNOWN") return 18 + ((n * 7) % 54);
+  return 9 + ((n * 29) % 88);
+}
+
+function pickDiversePrecedents<
+  T extends { outcome: FixturePrecedent["outcome"]; similarity: number },
+>(ranked: T[], count: number): T[] {
+  const buckets: Record<string, T[]> = {
+    REMEDIATION_SUCCEEDED: [],
+    REMEDIATION_WORSENED: [],
+    HOLD_CORRECT: [],
+    UNKNOWN: [],
+  };
+  for (const row of ranked) {
+    buckets[row.outcome]?.push(row);
+  }
+
+  const picked: T[] = [];
+  const take = (key: string) => {
+    const next = buckets[key]?.shift();
+    if (next && !picked.includes(next)) picked.push(next);
+  };
+
+  take("REMEDIATION_WORSENED");
+  take("REMEDIATION_SUCCEEDED");
+  take("HOLD_CORRECT");
+  take("REMEDIATION_WORSENED");
+  take("REMEDIATION_SUCCEEDED");
+
+  for (const row of ranked) {
+    if (picked.length >= count) break;
+    if (!picked.includes(row)) picked.push(row);
+  }
+
+  return picked.slice(0, count);
 }
 
 interface MutableState {
@@ -195,6 +274,8 @@ interface MutableState {
   executedRulings: Map<string, { precedentNumber: number; citation: string }>;
   liveRulings: Map<string, RulingRecord>;
   liveHearings: Map<string, Hearing>;
+  /** Incidents from the GitHub Source connector via tribunal.incidents, keyed by case number. */
+  streamedIncidents: Map<string, Incident>;
 }
 
 let mutableState: MutableState | null = null;
@@ -210,6 +291,7 @@ export function getFixtureState(): MutableState {
       executedRulings: new Map(),
       liveRulings: new Map(),
       liveHearings: new Map(),
+      streamedIncidents: new Map(),
     };
   }
   return mutableState;

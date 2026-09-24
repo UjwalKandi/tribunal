@@ -15,19 +15,20 @@ import type {
   RulingRecord,
 } from "@/lib/schemas";
 import {
-  FIXTURE_DEFENSE,
   FIXTURE_HEARING,
   FIXTURE_INCIDENTS,
   FIXTURE_PRECEDENT_COUNT,
-  FIXTURE_PROSECUTION,
-  FIXTURE_RULING,
   fixtureMatchPrecedents,
   getFixtureState,
   isFixtureMode,
-  resetFixtureReplay,
   distantVetoPlaceholder,
   type FixturePrecedent,
 } from "@/fixtures/demo-data";
+import {
+  archivedHearingByHearingId,
+  archivedHearingByRulingId,
+  archivedHearingFor,
+} from "@/fixtures/case-hearings";
 
 let service: SupabaseClient | null = null;
 
@@ -100,9 +101,15 @@ function mapRuling(row: Record<string, unknown>): RulingRecord {
   };
 }
 
+/** Newest connector-fed incidents shown on the docket, ahead of the fixture cases. */
+const STREAMED_DOCKET_LIMIT = 5;
+
 export async function getDocket(): Promise<Incident[]> {
   if (isFixtureMode()) {
-    return FIXTURE_INCIDENTS.filter((i) => i.status === "AWAITING_HEARING");
+    const streamed = [...getFixtureState().streamedIncidents.values()]
+      .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+      .slice(0, STREAMED_DOCKET_LIMIT);
+    return [...streamed, ...FIXTURE_INCIDENTS.filter((i) => i.status === "AWAITING_HEARING")];
   }
   const { data, error } = await getServiceClient().from("docket").select("*");
   if (error) throw new Error(error.message);
@@ -111,7 +118,9 @@ export async function getDocket(): Promise<Incident[]> {
 
 export async function getIncident(id: string): Promise<Incident> {
   if (isFixtureMode()) {
-    const incident = FIXTURE_INCIDENTS.find((i) => i.id === id);
+    const incident =
+      FIXTURE_INCIDENTS.find((i) => i.id === id) ??
+      [...getFixtureState().streamedIncidents.values()].find((i) => i.id === id);
     if (!incident) throw new Error(`Incident not found: ${id}`);
     return incident;
   }
@@ -168,6 +177,8 @@ export async function getRuling(rulingId: string): Promise<RulingRecord> {
     const live = state.liveRulings.get(rulingId);
     if (live) return { ...live };
     if (state.ruling.id === rulingId) return { ...state.ruling };
+    const archived = archivedHearingByRulingId(rulingId);
+    if (archived) return { ...archived.ruling };
     throw new Error(`Ruling not found: ${rulingId}`);
   }
   const { data, error } = await getServiceClient().from("rulings").select("*").eq("id", rulingId).single();
@@ -182,13 +193,25 @@ export async function getStoredHearing(incidentId: string): Promise<{
   ruling: RulingRecord;
 } | null> {
   if (isFixtureMode()) {
-    if (incidentId !== FIXTURE_HEARING.incident_id) return null;
+    const archived = archivedHearingFor(incidentId);
+    if (!archived) return null;
     const state = getFixtureState();
+    const live = state.liveRulings.get(archived.ruling.id);
+    const ruling = live
+      ? { ...live }
+      : {
+          ...archived.ruling,
+          veto_opens_at: distantVetoPlaceholder(),
+          executed_at: null,
+          authority: null,
+        };
+    if (!live) state.liveRulings.set(archived.ruling.id, ruling);
+    state.liveHearings.set(archived.hearing.id, { ...archived.hearing });
     return {
-      hearing: { ...state.hearing },
-      prosecution: FIXTURE_PROSECUTION,
-      defense: FIXTURE_DEFENSE,
-      ruling: { ...state.ruling },
+      hearing: { ...archived.hearing },
+      prosecution: archived.prosecution,
+      defense: archived.defense,
+      ruling,
     };
   }
 
@@ -523,11 +546,7 @@ export async function matchPrecedentsDb(
   if (error) throw new Error(error.message);
 
   const matches = (data ?? []) as PrecedentMatch[];
-  return matches.sort((a, b) => {
-    if (a.outcome === "REMEDIATION_WORSENED" && b.outcome !== "REMEDIATION_WORSENED") return -1;
-    if (b.outcome === "REMEDIATION_WORSENED" && a.outcome !== "REMEDIATION_WORSENED") return 1;
-    return b.similarity - a.similarity;
-  });
+  return matches.sort((a, b) => b.similarity - a.similarity);
 }
 
 export async function hasVeto(rulingId: string): Promise<boolean> {
@@ -560,7 +579,26 @@ export async function getExistingExecution(
 
 export async function resetRulingForReplay(rulingId: string): Promise<void> {
   if (isFixtureMode()) {
-    resetFixtureReplay();
+    const state = getFixtureState();
+    const archived = archivedHearingByRulingId(rulingId);
+    const template = archived?.ruling ?? state.liveRulings.get(rulingId) ?? state.ruling;
+    const reset: RulingRecord = {
+      ...template,
+      id: rulingId,
+      veto_opens_at: distantVetoPlaceholder(),
+      executed_at: null,
+      authority: null,
+    };
+    state.liveRulings.set(rulingId, reset);
+    state.vetoes.delete(rulingId);
+    if (state.ruling.id === rulingId) {
+      state.ruling = { ...reset };
+      state.hearing = {
+        ...(archived?.hearing ?? state.hearing),
+        state: "RULED",
+        concluded_at: null,
+      };
+    }
     return;
   }
   await getServiceClient()
@@ -596,6 +634,17 @@ export async function armVetoWindow(rulingId: string): Promise<RulingRecord> {
       };
       return { ...state.ruling };
     }
+    const archived = archivedHearingByRulingId(rulingId);
+    if (archived) {
+      const armed = {
+        ...archived.ruling,
+        veto_opens_at: now,
+        executed_at: null,
+        authority: null,
+      };
+      state.liveRulings.set(rulingId, armed);
+      return { ...armed };
+    }
     throw new Error(`Ruling not found: ${rulingId}`);
   }
 
@@ -615,6 +664,8 @@ export async function getHearingIncidentId(hearingId: string): Promise<string> {
     const live = state.liveHearings.get(hearingId);
     if (live) return live.incident_id;
     if (state.hearing.id === hearingId) return state.hearing.incident_id;
+    const archived = archivedHearingByHearingId(hearingId);
+    if (archived) return archived.hearing.incident_id;
     return FIXTURE_HEARING.incident_id;
   }
   const { data, error } = await getServiceClient()

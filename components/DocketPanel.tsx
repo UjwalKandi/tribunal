@@ -72,10 +72,12 @@ export function DocketPanel({
               <button
                 key={incident.id}
                 type="button"
+                disabled={hearingActive}
                 onClick={() => onSelect(incident)}
                 className={cn(
                   "relative block w-full px-5 py-3.5 text-left transition-colors",
                   selected ? "bg-tribunal-inset" : "hover:bg-tribunal-raised",
+                  hearingActive && "cursor-not-allowed opacity-60",
                 )}
               >
                 {selected && (
@@ -122,7 +124,9 @@ export function DocketPanel({
           disabled={!selectedId || hearingActive}
           onClick={onConvene}
         >
-          Convene Hearing
+          {hearingActive
+            ? "Hearing in session"
+            : "Convene Hearing"}
         </Button>
       </div>
     </div>

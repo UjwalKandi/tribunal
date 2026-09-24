@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { armVetoWindow } from "@/lib/db/queries";
+import { armVetoWindow, getHearingIncidentId } from "@/lib/db/queries";
+import { publishRulingOpened } from "@/lib/stream/court";
+import { flinkExecutor, heartbeatFor, streamingEnabled, watchExecutions } from "@/lib/stream/kafka";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +14,16 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const ruling = await armVetoWindow(body.rulingId);
+
+    // Flink's veto window (confluent/flink/02_veto_window.sql) starts its clock
+    // on this record. Awaited so the clock never starts after the UI's does.
+    if (streamingEnabled()) {
+      await publishRulingOpened(ruling, await getHearingIncidentId(ruling.hearing_id));
+    }
+    if (flinkExecutor()) {
+      watchExecutions();
+      heartbeatFor(ruling.veto_window_seconds + 15);
+    }
     return NextResponse.json({
       rulingId: ruling.id,
       opensAt: ruling.veto_opens_at,

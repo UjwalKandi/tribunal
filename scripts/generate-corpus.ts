@@ -156,7 +156,14 @@ const precedents = Array.from({ length: TARGET }, (_, i) => {
     summary,
     verdict: outcomes[outcome],
     outcome,
-    mttr_minutes: outcome === "REMEDIATION_WORSENED" ? 340 : 28,
+    mttr_minutes:
+      outcome === "REMEDIATION_WORSENED"
+        ? 41 + ((n * 23) % 287)
+        : outcome === "HOLD_CORRECT"
+          ? 14 + ((n * 11) % 76)
+          : outcome === "UNKNOWN"
+            ? 18 + ((n * 7) % 54)
+            : 9 + ((n * 29) % 88),
     keywords: curated?.keywords ?? issue.title.toLowerCase().split(/\W+/).filter((w) => w.length > 4).slice(0, 8),
     is_seeded: true,
     source_url: issue.html_url,

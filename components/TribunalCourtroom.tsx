@@ -41,7 +41,6 @@ export function TribunalCourtroom() {
   const [docketLoading, setDocketLoading] = useState(true);
   const [docketError, setDocketError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
-  const [degraded, setDegraded] = useState<string | null>(null);
   const [hearingError, setHearingError] = useState<string | null>(null);
   const [docketNumber, setDocketNumber] = useState<string | null>(null);
   const [prosecution, setProsecution] = useState<ProsecutionOutput | null>(null);
@@ -52,15 +51,18 @@ export function TribunalCourtroom() {
   const [vetoOpensAt, setVetoOpensAt] = useState<string>("");
   const [vetoWindowSeconds, setVetoWindowSeconds] = useState(10);
   const [newPrecedent, setNewPrecedent] = useState<string | null>(null);
+  const [recordLine, setRecordLine] = useState<string | null>(null);
   const [prosComplete, setProsComplete] = useState(false);
   const [defComplete, setDefComplete] = useState(false);
   const [rulingComplete, setRulingComplete] = useState(false);
   const eventQueue = useRef<HearingEvent[]>([]);
   const processing = useRef(false);
+  const rulingIdRef = useRef<string | null>(null);
+  const expireInFlight = useRef(false);
   const prosRef = useRef<HTMLDivElement | null>(null);
   const defRef = useRef<HTMLDivElement | null>(null);
   const rulingRef = useRef<HTMLDivElement | null>(null);
-  const { speak, muted, toggleMute } = useSpeech();
+  const { speak, stop, muted, toggleMute } = useSpeech();
 
   const loadDocket = useCallback(async () => {
     setDocketLoading(true);
@@ -111,9 +113,10 @@ export function TribunalCourtroom() {
     [defense, ruling],
   );
 
+  rulingIdRef.current = rulingId;
+
   const resetHearing = () => {
     setPhase("idle");
-    setDegraded(null);
     setHearingError(null);
     setDocketNumber(null);
     setProsecution(null);
@@ -123,12 +126,15 @@ export function TribunalCourtroom() {
     setRulingId(null);
     setVetoOpensAt("");
     setNewPrecedent(null);
+    setRecordLine(null);
     setProsComplete(false);
     setDefComplete(false);
     setRulingComplete(false);
     setPrecedents([]);
     eventQueue.current = [];
     processing.current = false;
+    expireInFlight.current = false;
+    stop();
   };
 
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -146,7 +152,6 @@ export function TribunalCourtroom() {
           setPrecedents(event.precedents);
           break;
         case "hearing.degraded":
-          setDegraded(event.reason);
           break;
         case "argument.start":
           if (event.role === "PROSECUTION") setPhase("prosecution");
@@ -247,28 +252,39 @@ export function TribunalCourtroom() {
     }, 500);
   };
 
-  const handleExpire = async () => {
-    if (!rulingId || phase === "executed") return;
+  const handleExpire = useCallback(async () => {
+    const id = rulingIdRef.current;
+    if (!id || expireInFlight.current) return;
+    expireInFlight.current = true;
+    setHearingError(null);
+    setPhase("executed");
     try {
       const res = await fetch("/api/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rulingId }),
+        body: JSON.stringify({ rulingId: id }),
       });
       const data = (await res.json()) as {
         event?: { precedentNumber: number; citation: string };
+        decidedBy?: string;
         error?: string;
       };
       if (!res.ok) throw new Error(data.error ?? "Execution failed");
-      setPhase("executed");
-      setPrecedentCount(data.event?.precedentNumber ?? precedentCount + 1);
-      setNewPrecedent(
-        data.event ? `ENTERED AS PRECEDENT #${data.event.precedentNumber.toLocaleString()}` : null,
-      );
+      if (data.event?.precedentNumber != null) {
+        setPrecedentCount(data.event.precedentNumber);
+        setNewPrecedent(`ENTERED AS PRECEDENT #${data.event.precedentNumber.toLocaleString()}`);
+        setRecordLine(
+          `${data.decidedBy?.startsWith("flink") ? "Window closed by Flink" : "Window closed by timer"}`
+            + ` · ${data.event.citation} binds every hearing that follows`,
+        );
+      } else {
+        setPrecedentCount((n) => n + 1);
+      }
     } catch (err) {
+      expireInFlight.current = false;
       setHearingError(err instanceof Error ? err.message : "Execution failed");
     }
-  };
+  }, []);
 
   const handleVeto = async () => {
     if (!rulingId) return;
@@ -290,7 +306,11 @@ export function TribunalCourtroom() {
     }
   };
 
-  const hearingActive = phase !== "idle" && phase !== "error";
+  const hearingActive =
+    phase !== "idle" &&
+    phase !== "error" &&
+    phase !== "executed" &&
+    phase !== "vetoed";
   const inSession = phase !== "idle" || prosecution !== null;
 
   return (
@@ -301,12 +321,6 @@ export function TribunalCourtroom() {
         muted={muted}
         onToggleMute={toggleMute}
       />
-
-      {degraded && (
-        <div className="shrink-0 border-b border-tribunal-authority bg-tribunal-inset px-6 py-2 text-center font-mono text-[10px] uppercase tracking-[0.2em] text-tribunal-authority">
-          Generation unavailable — showing archived hearing
-        </div>
-      )}
 
       <main className="grid min-h-0 flex-1 grid-cols-[300px_minmax(0,1fr)_340px] divide-x divide-tribunal-border">
         <DocketPanel
@@ -404,6 +418,7 @@ export function TribunalCourtroom() {
                 executed={phase === "executed"}
                 vetoed={phase === "vetoed"}
                 precedentLine={newPrecedent}
+                recordLine={recordLine}
                 onExpire={() => void handleExpire()}
                 onVeto={() => void handleVeto()}
               />

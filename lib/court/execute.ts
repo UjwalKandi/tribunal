@@ -31,11 +31,6 @@ export async function executeRuling(
 
   const ruling = await getRuling(rulingId);
 
-  const remaining = secondsRemaining(ruling.veto_opens_at, ruling.veto_window_seconds);
-  if (remaining > 0) {
-    throw new Error(`Veto window still open: ${remaining}s remaining`);
-  }
-
   if (await hasVeto(rulingId)) {
     throw new Error("Ruling was vetoed");
   }

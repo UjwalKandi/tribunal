@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { vetoRuling } from "@/lib/court/execute";
 import { encodeEvent } from "@/lib/court/events";
+import { getRuling } from "@/lib/db/queries";
+import { publishVeto } from "@/lib/stream/court";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const event = await vetoRuling(body.rulingId, body.secondsRemaining, body.reason);
+    await publishVeto(await getRuling(body.rulingId), body.secondsRemaining, body.reason);
     return NextResponse.json({ event, sse: encodeEvent(event) });
   } catch (err) {
     return NextResponse.json(
