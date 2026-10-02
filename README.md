@@ -194,3 +194,9 @@ Rebuild GitHub fixtures (optional): `npm run fetch-issues && npm run generate-co
 **[A.I.D.E.](https://github.com/UjwalKandi/A.I.D.E)** (Meta ATX Llama Hackathon, April 2024) diagnosed failures and had no authority and no memory. TRIBUNAL decides, justifies adversarially, can be overruled for ten seconds on stage, and binds the next hearing.
 
 **Build the courtroom before you need it.**
+
+---
+
+## Built at
+
+TRIBUNAL was built during the **Cursor Austin × AITX Hackathon**. See the [project page](https://aitx-cursor-hackathon-showcase.vercel.app/projects/tribunal) on the [hackathon showcase](https://aitx-cursor-hackathon-showcase.vercel.app/).
