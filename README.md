@@ -20,6 +20,53 @@ pipeline that improves the longer it runs.
 **Prior work:** [A.I.D.E.](https://github.com/UjwalKandi/A.I.D.E)  
 **Local demo:** `http://localhost:3000/tribunal` (no cloud deploy in this checkout)
 
+![TRIBUNAL courtroom — ruling executed under autonomous authority, entered as precedent #1,206](screenshots/07-precedent-1206.png)
+
+---
+
+## Screenshots
+
+A full hearing for **CASE-2281**, top to bottom. All images live in [`screenshots/`](screenshots/).
+
+**1. Exhibit A and the Prosecution.** The incident as filed, with the precedent registry retrieving cited `TRIB-*` holdings and their similarity scores.
+
+![Exhibit A and Office of the Prosecution](screenshots/03-exhibit-and-prosecution.png)
+
+**2. Prosecution claims.** Each claim is pinned to a quoted line of evidence, followed by harm and motion.
+
+![Prosecution claims with quoted evidence](screenshots/04-prosecution-claims.png)
+
+**3. Defense and ruling.** The Defense argues precedent harm with cited authorities, and the Judge rules.
+
+![Defense authorities and the Ruling of the Tribunal](screenshots/05-defense-and-ruling.png)
+
+**4. Human veto window.** Ten seconds to overrule before the ruling executes.
+
+![Human veto window countdown](screenshots/06-veto-window.png)
+
+**5. Entered as precedent.** No veto, so the ruling executes under `AUTONOMOUS` authority and becomes `TRIB-1206`.
+
+![Veto window closed — entered as precedent #1,206](screenshots/07-precedent-1206.png)
+
+<details>
+<summary>Early wireframes</summary>
+
+![Courtroom wireframe](screenshots/01-wireframe-courtroom.png)
+![Three-column layout wireframe](screenshots/02-wireframe-layout.png)
+
+</details>
+
+<details>
+<summary>Confluent Cloud event stream</summary>
+
+`tribunal.*` topics and their stream lineage: incidents → hearing events, rulings, vetoes, precedents → Flink → executions.
+
+![Confluent stream lineage](screenshots/10-confluent-stream-lineage.png)
+![Confluent stream lineage detail](screenshots/09-confluent-stream-lineage-detail.png)
+![Confluent topics](screenshots/08-confluent-topics.png)
+
+</details>
+
 ---
 
 ## Quick start
@@ -73,7 +120,7 @@ flowchart TD
   sse --> cache{"CASE-2281 precached?"}
   cache -->|yes| replay["Replay stored arguments"]
   cache -->|no + LLM key| live["Prosecute then Defend then Adjudicate"]
-  cache -->|no + no key| degrade["Degrade banner then replay 2281"]
+  cache -->|no + no key| degrade["Replay that case's archived hearing"]
   live --> zod["Zod validate citations"]
   replay --> stage["Typewriter UI plus spoken ruling"]
   zod --> stage
@@ -133,7 +180,7 @@ Rebuild GitHub fixtures (optional): `npm run fetch-issues && npm run generate-co
 
 - Fixture mode, not live pgvector, unless you apply `supabase/schema.sql` and embed.
 - Demo veto is **10 seconds** (pitch copy still uses sixty as the operational metaphor).
-- CASE-4417 without an LLM key degrades to archived CASE-2281.
+- Without an LLM key, CASE-3104 / 4417 / 5002 replay archived hearings from `fixtures/case-hearings.ts`.
 - Holdings are not fully LLM-extracted; padded citations reuse issue text.
 - No auth, no production execution, no mobile layout, no appeals UI.
 - No Vercel URL in this submission — judges should run locally or watch the Loom.
